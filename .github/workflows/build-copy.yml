@@ -1,0 +1,106 @@
+name: Build - Container Build & Push
+
+on:
+  workflow_call:
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
+jobs:
+
+  # ============================================================
+  # GATE 5: BUILD
+  # ============================================================
+  build:
+    name: Build & Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
+
+  # ============================================================
+  # GATE 6: CONTAINER IMAGE SCAN - Trivy
+  # ============================================================
+  image_scan:
+    name: Container Scan - Trivy
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Image (for scanning)
+        run: docker build --pull -t bankapp:scan-${{ github.sha }} .
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      - name: Run Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: bankapp:scan-${{ github.sha }}
+          format: 'table'
+          exit-code: '1'         # Enforce: fail pipeline on CRITICAL/HIGH findings
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          output: trivy-report.txt
+          trivy-config: trivy.yaml
+
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-scan-report
+          path: trivy-report.txt
+
+# ============================================================
+# GATE 7: PUSH TO DOCKER HUB
+# ============================================================
+  push_to_dockerhub:
+    name: Push to Docker Hub
+    runs-on: ubuntu-latest
+    needs: image_scan
+    steps:
+      - name: Download Image Tar
+        uses: actions/download-artifact@v4
+        with:
+          name: bankapp-image
+ 
+      - name: Load Docker Image
+        run: docker load -i bankapp-image.tar
+ 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+ 
+      - name: Tag and Push Image to Docker Hub
+        run: |
+          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
+          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
