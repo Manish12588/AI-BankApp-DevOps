@@ -76,32 +76,31 @@ jobs:
           name: trivy-scan-report
           path: trivy-report.txt
 
-  # ============================================================
-  # GATE 7: PUSH TO ECR
-  # ============================================================
-  push_to_ecr:
-    name: Push to ECR
+# ============================================================
+# GATE 7: PUSH TO DOCKER HUB
+# ============================================================
+  push_to_dockerhub:
+    name: Push to Docker Hub
     runs-on: ubuntu-latest
     needs: image_scan
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Download Image Tar
+        uses: actions/download-artifact@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, Tag, and Push Image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
+          name: bankapp-image
+ 
+      - name: Load Docker Image
+        run: docker load -i bankapp-image.tar
+ 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+ 
+      - name: Tag and Push Image to Docker Hub
         run: |
-          docker build --pull -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
+          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
