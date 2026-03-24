@@ -30,13 +30,13 @@ jobs:
             sudo usermod -aG docker $USER
             mkdir -p ~/bankapp
 
-      - name: Copy app-tier.yml to EC2
+      - name: Copy docker-compose.yml to EC2
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.EC2_SSH_HOST }}
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          source: "app-tier.yml"
+          source: "docker-compose.yml"
           target: "~/bankapp"
 
       - name: Deploy via SSH
@@ -54,19 +54,14 @@ jobs:
             cd ~/bankapp
 
             # Write .env file from GitHub Secrets
-            cat > .env << 'ENVEOF'
+            cat > .env << ENVEOF
             DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             IMAGE_TAG=${{ github.sha }}
-            MYSQL_DATABASE=bankappdb
-            MYSQL_USER=root
-            MYSQL_PASSWORD=Test@123
-            MYSQL_ROOT_PASSWORD=Test@123
-            MYSQL_HOST=mysql
             ENVEOF
 
             # Pull latest images and redeploy
-            docker compose -f app-tier.yml pull
-            docker compose -f app-tier.yml up -d --force-recreate --remove-orphans
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d --force-recreate --remove-orphans
 
             # Clean up dangling images
             docker image prune -f
