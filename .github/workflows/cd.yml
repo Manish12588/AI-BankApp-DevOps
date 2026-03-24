@@ -24,7 +24,11 @@ jobs:
           host: ${{ secrets.EC2_SSH_HOST }}
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          script: mkdir -p ~/bankapp
+          script: |
+            echo "Installing required packages & folders"
+            sudo apt-get update && sudo apt-get install docker.io -y
+            sudo usermod -aG docker $USER
+            mkdir -p ~/bankapp
 
       - name: Copy app-tier.yml to EC2
         uses: appleboy/scp-action@master
@@ -53,10 +57,10 @@ jobs:
             cat > .env << 'ENVEOF'
             DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
             IMAGE_TAG=${{ github.sha }}
-            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
-            MYSQL_USER=${{ secrets.MYSQL_USER }}
-            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
-            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+            MYSQL_DATABASE=bankappdb
+            MYSQL_USER=root
+            MYSQL_PASSWORD=Test@123
+            MYSQL_ROOT_PASSWORD=Test@123
             MYSQL_HOST=mysql
             ENVEOF
 
@@ -79,7 +83,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.15.0
         continue-on-error: true  # Workaround for ZAP's internal artifact upload bug
         with:
-          target: 'http://${{ secrets.EC2_HOST }}:8080'
+          target: 'http://${{ secrets.EC2_SSH_HOST }}:8080'
           artifact_name: zapreport
           fail_action: false
           allow_issue_writing: false
