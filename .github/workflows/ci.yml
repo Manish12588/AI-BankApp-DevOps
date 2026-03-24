@@ -83,6 +83,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Cache Maven Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-
+
       - name: Cache OWASP NVD Database
         uses: actions/cache@v4
         with:
@@ -98,7 +106,9 @@ jobs:
           mvn org.owasp:dependency-check-maven:check \
             -DfailBuildOnCVSS=7 \
             -DnvdApiKey="${NVD_API_KEY}" \
-            -DsuppressionFile=suppression.xml
+            -DsuppressionFile=suppression.xml \
+            -Dmaven.wagon.httpconnectionManager.ttlSeconds=120 \
+            -Dmaven.wagon.http.retryHandler.count=3
 
       - name: Upload Dependency Check Report
         uses: actions/upload-artifact@v4
