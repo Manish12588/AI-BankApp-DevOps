@@ -53,12 +53,12 @@ jobs:
 
             cd ~/bankapp
 
-            # Write .env file from GitHub Secrets
-            cat > .env << ENVEOF
-            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-            IMAGE_TAG=${{ github.sha }}
-            ENVEOF
+            # Write .env with no leading spaces
+            printf "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}\n" > .env
+            printf "IMAGE_TAG=${{ github.sha }}\n" >> .env
 
+            cat .env
+            
             # Pull latest images and redeploy
             docker compose -f docker-compose.yml pull
             docker compose -f docker-compose.yml up -d --force-recreate --remove-orphans
