@@ -4,7 +4,6 @@ on:
   workflow_call:
 
 permissions:
-  id-token: write  # Required for OIDC
   contents: read
 
 jobs:
@@ -46,8 +45,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Build Docker Image (for scanning)
-        run: docker build --pull -t bankapp:scan-${{ github.sha }} .
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push scan-tagged Image
+        run: |
+          docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }} .
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }}
 
       - name: Cache Trivy DB
         uses: actions/cache@v4
@@ -60,7 +67,7 @@ jobs:
       - name: Run Trivy Image Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: bankapp:scan-${{ github.sha }}
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }}
           format: 'table'
           exit-code: '1'         # Enforce: fail pipeline on CRITICAL/HIGH findings
           ignore-unfixed: true
@@ -76,7 +83,7 @@ jobs:
           name: trivy-scan-report
           path: trivy-report.txt
 
-# ============================================================
+  # ============================================================
   # GATE 7: PUSH TO DOCKER HUB
   # ============================================================
   push_to_dockerhub:
@@ -84,27 +91,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: image_scan
     steps:
-      - name: Download Image Tar
-        uses: actions/download-artifact@v4
-        with:
-          name: bankapp-image
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.run_id }}
-          path: .
- 
-      - name: Load Docker Image
-        run: docker load -i bankapp-image.tar
- 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
- 
-      - name: Tag and Push Image to Docker Hub
+
+      - name: Retag and Push Final Image
         run: |
-          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
-          docker tag bankapp:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
+          # Pull the scan-tagged image built and scanned in Gate 6
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }}
+
+          # Retag to final tags
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
+
+          # Push final tags
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:${{ github.sha }}
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:latest
- 
+
+          # Delete the temporary scan tag
+          docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/bankapp:scan-${{ github.sha }}
