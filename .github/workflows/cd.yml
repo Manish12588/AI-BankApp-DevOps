@@ -4,7 +4,6 @@ on:
   workflow_call:
 
 permissions:
-  id-token: write  # Required for OIDC
   contents: read
 
 jobs:
@@ -22,52 +21,51 @@ jobs:
       - name: Create Deployment Directory
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_SSH_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           script: mkdir -p ~/bankapp
 
       - name: Copy app-tier.yml to EC2
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_SSH_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           source: "app-tier.yml"
           target: "~/bankapp"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_SSH_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           script: |
-            # Login to ECR
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+            # Login to Docker Hub
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
+              --username "${{ secrets.DOCKERHUB_USERNAME }}" \
+              --password-stdin
 
             cd ~/bankapp
 
-            # Fetch secrets from Secrets Manager and create .env
-            aws secretsmanager get-secret-value --secret-id bankapp/prod-secrets --query SecretString --output text > secrets.json
+            # Write .env file from GitHub Secrets
+            cat > .env << 'ENVEOF'
+            DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+            IMAGE_TAG=${{ github.sha }}
+            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+            MYSQL_USER=${{ secrets.MYSQL_USER }}
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+            MYSQL_HOST=mysql
+            ENVEOF
 
-            # Extract variables and write to .env
-            echo "DB_HOST=$(jq -r .DB_HOST secrets.json)" > .env
-            echo "DB_PORT=$(jq -r .DB_PORT secrets.json)" >> .env
-            echo "DB_NAME=$(jq -r .DB_NAME secrets.json)" >> .env
-            echo "DB_USER=$(jq -r .DB_USER secrets.json)" >> .env
-            echo "DB_PASSWORD=$(jq -r .DB_PASSWORD secrets.json)" >> .env
-            echo "OLLAMA_URL=$(jq -r .OLLAMA_URL secrets.json)" >> .env
-            echo "ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com" >> .env
-            echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> .env
-            echo "IMAGE_TAG=${{ github.sha }}" >> .env
-
-            # Clean up
-            rm secrets.json
-
-            # Pull and Deploy using the app-tier.yml transferred via SCP
+            # Pull latest images and redeploy
             docker compose -f app-tier.yml pull
-            docker compose -f app-tier.yml up -d --build
+            docker compose -f app-tier.yml up -d --force-recreate --remove-orphans
+
+            # Clean up dangling images
+            docker image prune -f
 
   # ============================================================
   # GATE 9: DAST - Dynamic Application Security Testing
